@@ -1,0 +1,105 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - version
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: linux, arch: amd64, pkg: tar.gz }
+          - { os: linux, arch: arm64, pkg: tar.gz }
+          - { os: windows, arch: amd64, pkg: zip }
+          - { os: windows, arch: arm64, pkg: zip }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get version from file
+        run: |
+          echo "version=$(cat version)" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Build ${{ matrix.os }}/${{ matrix.arch }}
+        shell: bash
+        run: |
+          EXE=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXE=".exe"; fi
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build \
+            -trimpath -ldflags="-s -w -X main.version=${{ env.version }}" \
+            -o dist/openlist-sync-${{ matrix.os }}-${{ matrix.arch }}$EXE ./cmd/openlist-sync
+
+      - name: Package
+        shell: bash
+        run: |
+          NAME=openlist-sync-${{ matrix.os }}-${{ matrix.arch }}
+          mkdir -p pkg
+          if [ "${{ matrix.pkg }}" = "zip" ]; then
+            (cd dist && python3 -m zipfile -c ../pkg/$NAME.zip $NAME.exe)
+          else
+            tar -czvf pkg/$NAME.tar.gz -C dist $NAME
+          fi
+          sha256sum pkg/$NAME.${{ matrix.pkg }} > pkg/$NAME.sha256
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.os }}-${{ matrix.arch }}
+          path: pkg
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get version from file
+        run: |
+          echo "version=$(cat version)" >> $GITHUB_ENV
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: pkg
+
+      - name: Check if release already exists
+        id: check_release
+        run: |
+          if gh release view ${{ env.version }} >/dev/null 2>&1; then
+            echo "RELEASE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "RELEASE_EXISTS=false" >> $GITHUB_ENV
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: env.RELEASE_EXISTS == 'false'
+        run: |
+          git log -1 --format=%B > notes.md
+          gh release create ${{ env.version }} \
+            --title "${{ env.version }}" \
+            --notes-file notes.md \
+            pkg/*.tar.gz pkg/*.zip pkg/*.sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip release notification
+        if: env.RELEASE_EXISTS == 'true'
+        run: echo "release ${{ env.version }} already exists, skipping"
