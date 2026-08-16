@@ -1,0 +1,350 @@
+package web
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"openlist-sync/internal/client"
+)
+
+//go:embed static/*
+var staticFS embed.FS
+
+// Server is the web/API front for OpenListSync.
+type Server struct {
+	store    *Store
+	runner   *Runner
+	logs     *LogBuffer
+	apiToken string
+	version  string
+}
+
+func NewServer(store *Store, runner *Runner, logs *LogBuffer, apiToken, version string) *Server {
+	return &Server{store: store, runner: runner, logs: logs, apiToken: apiToken, version: version}
+}
+
+func jsonErr(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg})
+}
+
+func jsonOK(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return false
+	}
+	return true
+}
+
+// requireAuth guards the API with a token when configured.
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	if s.apiToken == "" {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		tok := r.Header.Get("X-API-Token")
+		if tok == "" {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				tok = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+		if tok != s.apiToken {
+			jsonErr(w, http.StatusUnauthorized, "unauthorized: invalid API token")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) Routes() http.Handler {
+	mux := http.NewServeMux()
+
+	// API
+	mux.HandleFunc("/api/state", s.requireAuth(s.handleState))
+	mux.HandleFunc("/api/connections/save", s.requireAuth(s.handleConnectionSave))
+	mux.HandleFunc("/api/connections/delete", s.requireAuth(s.handleConnectionDelete))
+	mux.HandleFunc("/api/connections/test", s.requireAuth(s.handleConnectionTest))
+	mux.HandleFunc("/api/tasks/save", s.requireAuth(s.handleTaskSave))
+	mux.HandleFunc("/api/tasks/delete", s.requireAuth(s.handleTaskDelete))
+	mux.HandleFunc("/api/tasks/run", s.requireAuth(s.handleTaskRun))
+	mux.HandleFunc("/api/settings/save", s.requireAuth(s.handleSettingsSave))
+	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
+	mux.HandleFunc("/api/logs/clear", s.requireAuth(s.handleLogsClear))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	// static SPA
+	sub, _ := fs.Sub(staticFS, "static")
+	fileServer := http.FileServer(http.FS(sub))
+	index, _ := fs.ReadFile(sub, "index.html")
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			jsonErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			_, _ = w.Write(index)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+
+	return mux
+}
+
+// ---- state ----
+
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	st := s.store.Snapshot()
+	running := s.runner.RunningSet()
+	if running == nil {
+		running = []string{}
+	}
+	jsonOK(w, map[string]any{
+		"connections": st.Connections,
+		"tasks":       st.Tasks,
+		"settings":    st.Settings,
+		"running":     running,
+		"version":     s.version,
+	})
+}
+
+// ---- connections ----
+
+func (s *Server) handleConnectionSave(w http.ResponseWriter, r *http.Request) {
+	var c Connection
+	if !decodeBody(w, r, &c) {
+		return
+	}
+	if err := validateConnection(&c); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.store.UpsertConnection(&c)
+	_ = s.store.Save()
+	jsonOK(w, map[string]any{"ok": true, "id": c.ID})
+}
+
+func (s *Server) handleConnectionDelete(w http.ResponseWriter, r *http.Request) {
+	var body struct{ ID string `json:"id"` }
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	deleted := s.store.DeleteConnection(body.ID)
+	if deleted {
+		_ = s.store.Save()
+	}
+	jsonOK(w, map[string]any{"ok": deleted})
+}
+
+// testConnection pings an OpenList instance with the given credentials.
+func (s *Server) testConnection(ctx context.Context, c *Connection) error {
+	if err := validateConnection(c); err != nil {
+		return err
+	}
+	cl := client.New(strings.TrimRight(c.BaseURL, "/"), c.Token, c.Username, c.Password, c.DownloadMode == "proxy", func(string, ...any) {})
+	if _, err := cl.ListAll(ctx, "/"); err != nil {
+		return fmt.Errorf("连接失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) handleConnectionTest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID string `json:"id"`
+		Connection
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	c := &body.Connection
+	if c.BaseURL == "" && c.AuthType == "" {
+		if st := s.store.Connection(body.ID); st != nil {
+			c = st
+		} else {
+			jsonErr(w, http.StatusNotFound, "connection not found")
+			return
+		}
+	}
+	if err := s.testConnection(r.Context(), c); err != nil {
+		jsonErr(w, http.StatusOK, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true, "message": "连接正常"})
+}
+
+// ---- tasks ----
+
+func (s *Server) handleTaskSave(w http.ResponseWriter, r *http.Request) {
+	var t Task
+	if !decodeBody(w, r, &t) {
+		return
+	}
+	if err := validateTask(&t); err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.store.Connection(t.ConnectionID) == nil {
+		jsonErr(w, http.StatusBadRequest, "关联的 OpenList 连接不存在")
+		return
+	}
+	s.store.UpsertTask(&t)
+	_ = s.store.Save()
+	jsonOK(w, map[string]any{"ok": true, "id": t.ID})
+}
+
+func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
+	var body struct{ ID string `json:"id"` }
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	deleted := s.store.DeleteTask(body.ID)
+	if deleted {
+		_ = s.store.Save()
+	}
+	jsonOK(w, map[string]any{"ok": deleted})
+}
+
+func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
+	var body struct{ ID string `json:"id"` }
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if err := s.runner.RunTask(r.Context(), body.ID); err != nil {
+		jsonErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true})
+}
+
+// ---- settings ----
+
+func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
+	var st Settings
+	if !decodeBody(w, r, &st) {
+		return
+	}
+	if st.Concurrency < 1 || st.Concurrency > 64 {
+		st.Concurrency = 4
+	}
+	if st.RateLimit < 0 {
+		st.RateLimit = 0
+	}
+	if st.Retries < 0 || st.Retries > 20 {
+		st.Retries = 3
+	}
+	if st.Interval == "" {
+		st.Interval = "1h"
+	}
+	if d, err := parseDurFlex(st.Interval); err != nil || d <= 0 {
+		jsonErr(w, http.StatusBadRequest, "无效默认同步间隔: "+st.Interval)
+		return
+	}
+	s.store.SetSettings(st)
+	_ = s.store.Save()
+	jsonOK(w, map[string]any{"ok": true})
+}
+
+// ---- logs ----
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	n := 500
+	if v := r.URL.Query().Get("n"); v != "" {
+		if m, err := strconv.Atoi(v); err == nil && m > 0 {
+			n = m
+		}
+	}
+	jsonOK(w, map[string]any{"logs": s.logs.Snapshot(n)})
+}
+
+func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
+	s.logs.Clear()
+	jsonOK(w, map[string]any{"ok": true})
+}
+
+func validateConnection(c *Connection) error {
+	if strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("连接名称不能为空")
+	}
+	if strings.TrimSpace(c.BaseURL) == "" {
+		return fmt.Errorf("Base URL 不能为空")
+	}
+	if c.AuthType == "" {
+		c.AuthType = "token"
+	}
+	switch c.AuthType {
+	case "token":
+		if strings.TrimSpace(c.Token) == "" {
+			return fmt.Errorf("令牌模式需要填写 Token")
+		}
+	case "password":
+		if strings.TrimSpace(c.Username) == "" || strings.TrimSpace(c.Password) == "" {
+			return fmt.Errorf("密码模式需要填写用户名和密码")
+		}
+	default:
+		return fmt.Errorf("未知认证方式 %q", c.AuthType)
+	}
+	if c.DownloadMode == "" {
+		c.DownloadMode = "direct"
+	}
+	return nil
+}
+
+func validateTask(t *Task) error {
+	if strings.TrimSpace(t.RemotePath) == "" {
+		return fmt.Errorf("远端路径不能为空")
+	}
+	if strings.TrimSpace(t.LocalDir) == "" {
+		return fmt.Errorf("本地目录不能为空")
+	}
+	if strings.TrimSpace(t.ConnectionID) == "" {
+		return fmt.Errorf("请选择 OpenList 连接")
+	}
+	if t.Name == "" {
+		t.Name = t.RemotePath
+	}
+	if t.Direction == "" {
+		t.Direction = "both"
+	}
+	if t.Direction != "both" && t.Direction != "pull" && t.Direction != "push" {
+		return fmt.Errorf("未知同步方向 %q", t.Direction)
+	}
+	if t.Cleanup == "" {
+		t.Cleanup = "none"
+	}
+	switch t.Cleanup {
+	case "none", "local", "remote", "both":
+	default:
+		return fmt.Errorf("未知清理模式 %q", t.Cleanup)
+	}
+	if t.Conflict == "" {
+		t.Conflict = "newest"
+	}
+	switch t.Conflict {
+	case "newest", "remote", "local", "skip":
+	default:
+		return fmt.Errorf("未知冲突策略 %q", t.Conflict)
+	}
+	if strings.TrimSpace(t.Interval) != "" {
+		if d, err := parseDurFlex(t.Interval); err != nil || d <= 0 {
+			return fmt.Errorf("无效同步间隔 %q（支持 30s / 1h / 1d）", t.Interval)
+		}
+	}
+	return nil
+}
