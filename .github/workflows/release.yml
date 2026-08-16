@@ -1,0 +1,89 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - version
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from file
+        run: |
+          echo "version=$(cat version)" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Build for ${{ matrix.arch }}
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -trimpath -ldflags="-s -w -X main.version=${{ env.version }}" -o dist/openlist-sync-linux-${{ matrix.arch }} ./cmd/openlist-sync
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          tar -czvf pkg/openlist-sync-linux-${{ matrix.arch }}.tar.gz -C dist openlist-sync-linux-${{ matrix.arch }}
+          sha256sum pkg/openlist-sync-linux-${{ matrix.arch }}.tar.gz > pkg/openlist-sync-linux-${{ matrix.arch }}.sha256
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: pkg
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from file
+        run: |
+          echo "version=$(cat version)" >> $GITHUB_ENV
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: pkg
+
+      - name: Check if release already exists
+        id: check_release
+        run: |
+          if gh release view ${{ env.version }} >/dev/null 2>&1; then
+            echo "RELEASE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "RELEASE_EXISTS=false" >> $GITHUB_ENV
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: env.RELEASE_EXISTS == 'false'
+        run: |
+          gh release create ${{ env.version }} \
+            --title "${{ env.version }}" \
+            --notes "OpenListSync ${{ env.version }}" \
+            pkg/*.tar.gz pkg/*.sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip release notification
+        if: env.RELEASE_EXISTS == 'true'
+        run: echo "release ${{ env.version }} already exists, skipping"
