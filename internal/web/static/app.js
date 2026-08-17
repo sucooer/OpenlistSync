@@ -148,6 +148,24 @@ async function loadLogs() {
   } catch (_) {}
 }
 
+/* ---------- Theme ---------- */
+
+const THEME_KEY = "openlist.theme";
+let currentTheme = localStorage.getItem(THEME_KEY) || "system";
+
+function applyTheme(mode) {
+  const html = document.documentElement;
+  if (mode === "system") html.removeAttribute("data-theme");
+  else html.setAttribute("data-theme", mode);
+  localStorage.setItem(THEME_KEY, mode);
+}
+
+function setTheme(mode) {
+  currentTheme = mode;
+  applyTheme(mode);
+  renderSettings();
+}
+
 /* ---------- Toast / confirm ---------- */
 
 let toastTimer;
@@ -299,20 +317,32 @@ function renderOverview() {
   const stats = `
     <div class="card stat-card">
       <div class="stat-grid">
-        <div class="stat-cell">
-          <span class="stat-label">OpenList 连接</span>
+        <div class="stat-cell accent-conn">
+          <div class="stat-head">
+            <span class="stat-ico">${ICONS.server}</span>
+            <span class="stat-label">OpenList 连接</span>
+          </div>
           <span class="stat-value">${state.connections.length}</span>
         </div>
-        <div class="stat-cell">
-          <span class="stat-label">同步任务</span>
+        <div class="stat-cell accent-task">
+          <div class="stat-head">
+            <span class="stat-ico">${ICONS.task}</span>
+            <span class="stat-label">同步任务</span>
+          </div>
           <span class="stat-value">${state.tasks.length} <small>启用 ${enabled}</small></span>
         </div>
-        <div class="stat-cell">
-          <span class="stat-label">运行中</span>
-          <span class="stat-value" style="color:${running ? "var(--amber)" : "var(--text)"}">${running}</span>
+        <div class="stat-cell accent-live">
+          <div class="stat-head">
+            <span class="stat-ico">${ICONS.play}</span>
+            <span class="stat-label">运行中</span>
+          </div>
+          <span class="stat-value${running ? ' is-live' : ''}">${running}</span>
         </div>
-        <div class="stat-cell">
-          <span class="stat-label">最近成功</span>
+        <div class="stat-cell accent-ok">
+          <div class="stat-head">
+            <span class="stat-ico">${ICONS.check}</span>
+            <span class="stat-label">最近成功</span>
+          </div>
           <span class="stat-value">${okCount}<small>/ ${state.tasks.length}</small></span>
         </div>
       </div>
@@ -799,6 +829,19 @@ function renderSettings() {
   view.innerHTML = `
     <div class="card">
       <div class="card-head">
+        <h2>外观主题</h2>
+      </div>
+      <div style="padding: 6px 20px 22px">
+        <div class="chips" id="theme-chips">
+          <button class="chip${currentTheme === "system" ? " on" : ""}" onclick="setTheme('system')">跟随系统</button>
+          <button class="chip${currentTheme === "light" ? " on" : ""}" onclick="setTheme('light')">白天</button>
+          <button class="chip${currentTheme === "dark" ? " on" : ""}" onclick="setTheme('dark')">夜间</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-24">
+      <div class="card-head">
         <h2>全局同步参数</h2>
       </div>
       <div style="padding: 6px 20px 22px">
@@ -860,6 +903,8 @@ async function saveSettings() {
 }
 
 /* ---------- init ---------- */
+
+applyTheme(currentTheme);
 
 $$(".nav-item").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.view)));
 
