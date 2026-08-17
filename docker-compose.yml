@@ -1,7 +1,6 @@
 services:
   openlist-sync:
-    build: .
-    image: openlist-sync:latest
+    image: anyear/openlist-sync:latest
     container_name: openlist-sync
     restart: unless-stopped
     ports:
