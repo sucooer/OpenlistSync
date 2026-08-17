@@ -18,6 +18,27 @@ const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
+
+// normalizeExtForSave accepts any of "mp4", ".mp4", "*.mp4", "*foo*" and
+// rewrites bare suffixes to glob form ("*.mp4") so they match by extension.
+// Glob expressions that already contain '*', '?' or '[' are kept as-is.
+function normalizeExtForSave(s) {
+  return (s ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => (/[*?\[]/.test(x) ? x : (x.replace(/^\.+/, "") ? "*." + x.replace(/^\.+/, "") : "")))
+    .filter(Boolean);
+}
+
+// extListForDisplay converts a stored list back to a short user-facing form:
+// drops a leading "*." so "*.mp4" renders as "mp4"; leaves full globs intact.
+function extListForDisplay(list) {
+  return (list || [])
+    .map((s) => String(s || "").replace(/^\*\./, "").replace(/^\./, ""))
+    .filter(Boolean)
+    .join(", ");
+}
 const fmtBytes = (n) => {
   if (!n) return "0 B";
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -376,14 +397,14 @@ function renderOverview() {
               <span class="mono">${esc(t.remote_path)}</span> ${ICONS.arrow} <span class="mono">${esc(t.local_dir)}</span>
             </div>
           </div>
-          <div style="text-align:right">
+          <div class="task-status">
             ${statusBadge(t)}
-            <div class="small muted" style="margin-top:4px">${fmtTime(t.last_run)}</div>
+            <span class="small muted">${fmtTime(t.last_run)}</span>
           </div>
         </div>
       </div>
     `).join("");
-    body = `<div class="grid" style="grid-template-columns:1fr 1fr">${cards}</div>`;
+    body = `<div class="grid task-cards">${cards}</div>`;
   }
 
   view.innerHTML = stats + body;
@@ -710,11 +731,12 @@ function taskForm(id) {
     </div>
     <div class="form-group">
       <label class="form-label">扩展名包含（逗号分隔，留空 = 全部）</label>
-      <input class="field mono" id="task-include" placeholder="*.mp4, *.mkv" value="${esc((t.include_ext || []).join(", "))}">
+      <input class="field mono" id="task-include" placeholder="mp4, mkv, mp3, jpg…" value="${esc(extListForDisplay(t.include_ext))}">
+      <div class="muted small" style="margin-top:4px">只需填写后缀（如 mp3 、 .txt 、 json）；需要精确 glob 时用 *.tmp 、 *[Bb]ak 之类。</div>
     </div>
     <div class="form-group">
       <label class="form-label">扩展名排除（逗号分隔）</label>
-      <input class="field mono" id="task-exclude" placeholder="*.part, *.tmp" value="${esc((t.exclude_ext || []).join(", "))}">
+      <input class="field mono" id="task-exclude" placeholder="part, tmp, log…" value="${esc(extListForDisplay(t.exclude_ext))}">
     </div>
     <div class="field-grid">
       <div class="field-group">
@@ -760,8 +782,8 @@ async function saveTask(id) {
     direction: currentSeg($("#task-dir")),
     conflict: $("#task-conflict").value,
     cleanup: $("#task-cleanup").value,
-    include_ext: ($("#task-include").value || "").split(",").map((s) => s.trim()).filter(Boolean),
-    exclude_ext: ($("#task-exclude").value || "").split(",").map((s) => s.trim()).filter(Boolean),
+    include_ext: normalizeExtForSave($("#task-include").value),
+    exclude_ext: normalizeExtForSave($("#task-exclude").value),
     types: $$(".chip.on", $("#sheet-body")).map((c) => c.dataset.type),
     interval: $("#task-interval").value.trim(),
     rate_limit: parseInt($("#task-rate").value, 10) || 0,
@@ -788,8 +810,28 @@ function deleteTask(id) {
 
 /* ================= Logs ================= */
 
-let logStick = true;
+let logStick = true;            // 开者意图：是否启用自动跟随
+let logUserAtBottom = true;     // 表现状态：当前滚动是否处于“贴底”
+// 滚动偏离底部超过这个阈值后认为用户“上去阅读”了，暂停自动跟随。
+const LOG_STICK_THRESHOLD = 32;
+
+function logStickLabel() {
+  if (!logStick) return "已关闭跟随";
+  return logUserAtBottom ? "跟随最新" : "已暂停跟随";
+}
+
 function renderLogs(prevCount) {
+  // Snapshot the existing console BEFORE we wipe view.innerHTML — fully replacing
+  // #log-console resets scrollTop to 0, which would silently yank the user to the
+  // top even when we deliberately avoid auto-stick. We restore below.
+  const prevEl = state.currentView === "logs" ? document.getElementById("log-console") : null;
+  const prevScrollTop = prevEl ? prevEl.scrollTop : 0;
+  const prevScrollHeight = prevEl ? prevEl.scrollHeight : 0;
+  const prevScrollRatio = prevScrollHeight > 0 ? prevScrollTop / prevScrollHeight : 0;
+  const prevWasAtBottom = prevEl
+    ? (prevScrollHeight - prevScrollTop - prevEl.clientHeight) <= LOG_STICK_THRESHOLD
+    : true;
+
   const view = $("#view");
   const lines = state.logs.map((l) => {
     let cls = "";
@@ -804,10 +846,10 @@ function renderLogs(prevCount) {
       <div class="card-head">
         <div>
           <h2>同步日志</h2>
-          <div class="sub">共 ${state.logs.length} 条记录 · 自动刷新 ${logStick ? "· 跟随最新" : ""}</div>
+          <div class="sub">共 ${state.logs.length} 条记录 · <span id="log-stick-state">${logStickLabel()}</span></div>
         </div>
         <button class="ghost icon-btn" id="log-clear" title="清空日志">${ICONS.trash}</button>
-        <label class="switch" title="自动滚动跟随最新日志">
+        <label class="switch" title="启用后：新日志进来时如果你在底部则贴底跟随；滚上去阅读时自动暂停">
           <input type="checkbox" id="log-stick" checked>
           <span class="track"></span>
         </label>
@@ -815,8 +857,24 @@ function renderLogs(prevCount) {
       <div class="log-console" id="log-console">${lines}</div>
     </div>`;
 
-  $("#log-stick").checked = logStick;
-  $("#log-stick").addEventListener("change", (e) => { logStick = e.target.checked; });
+  const stickCheckbox = $("#log-stick");
+  const stickLabel = $("#log-stick-state");
+  stickCheckbox.checked = logStick;
+  // 首次进入页面：默认认为贴底。重渲染（轮询拉新表）时，依据上次的滚动状态决定
+  // 新元素初始滚动位置。prevEl 不为空说明是老表被拍平重画。
+  if (!prevEl) logUserAtBottom = true;
+  else logUserAtBottom = prevWasAtBottom && logStick;
+  refreshLogLabel(stickLabel);
+  stickCheckbox.addEventListener("change", (e) => {
+    logStick = e.target.checked;
+    if (logStick) {
+      // 重新启用跟随：先回到底部，以后保持跟踪。
+      const c = $("#log-console");
+      if (c) c.scrollTop = c.scrollHeight;
+      logUserAtBottom = true;
+    }
+    refreshLogLabel(stickLabel);
+  });
   $("#log-clear").onclick = async () => {
     await api("/api/logs/clear", "POST", {});
     state.logs = [];
@@ -825,8 +883,40 @@ function renderLogs(prevCount) {
   };
 
   const consoleEl = $("#log-console");
-  const shouldStick = logStick || state.logs.length <= prevCount;
-  if (shouldStick) consoleEl.scrollTop = consoleEl.scrollHeight;
+  // Decisión: 首次进入 => 钉底;重渲染时:
+  //   - 开关启用 且 上次貼底 => 继续貼底(贴新底)
+  //   - 否则 => 按比例恢复之前的滚动位置 (用户上去阅读的体验不被冲走)
+  const justLoaded = prevCount === undefined || !prevEl;
+  const shouldStick = justLoaded || (logStick && logUserAtBottom);
+  requestAnimationFrame(() => {
+    if (shouldStick) {
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    } else if (prevEl) {
+      // 按比例保留滚动点。下方新加行不会移动上面的内容,所以近似原来阅读处。
+      const newMax = consoleEl.scrollHeight - consoleEl.clientHeight;
+      const target = Math.round(prevScrollRatio * consoleEl.scrollHeight);
+      consoleEl.scrollTop = Math.min(Math.max(target, 0), newMax);
+    }
+  });
+  // 交互：滚到一定高度以上后认为“上去读了”，暂停跟随；回到底部时恢复。
+  consoleEl.addEventListener("scroll", () => {
+    const dist = consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight;
+    const nearBottom = dist <= LOG_STICK_THRESHOLD;
+    if (nearBottom !== logUserAtBottom) {
+      logUserAtBottom = nearBottom;
+      refreshLogLabel(stickLabel);
+      // 同步 checkbox 可见性:跟随暂停(微调一下表示手势状态)
+      const ind = $("#log-stick-indicator");
+      if (ind) ind.textContent = logUserAtBottom ? "" : " (翻阅中)";
+    }
+  });
+}
+
+function refreshLogLabel(el) {
+  if (!el) return;
+  el.textContent = logStickLabel();
+  el.classList.toggle("paused", logStick && !logUserAtBottom);
+  el.classList.toggle("off", !logStick);
 }
 
 /* ================= Settings ================= */

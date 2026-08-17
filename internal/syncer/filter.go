@@ -17,12 +17,39 @@ type Filter struct {
 
 func NewFilter(include, exclude, fileTypes []string) *Filter {
 	f := &Filter{types: map[string]bool{}}
-	f.include = include
-	f.exclude = exclude
+	f.include = normalizeExt(include)
+	f.exclude = normalizeExt(exclude)
 	for _, t := range fileTypes {
 		f.types[t] = true
 	}
 	return f
+}
+
+// normalizeExt turns the user-supplied extension list into a list of glob
+// patterns that match against file basenames via path.Match.
+//
+// Accepts both bare suffixes ("mp3", ".txt") and full glob patterns
+// ("*.mp4", "*foo*"). Bare suffixes are rewritten as "*.<suffix>" so they
+// match-by-extension; anything that already looks like a glob is kept as-is.
+// Empty entries are dropped.
+func normalizeExt(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, p := range list {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.ContainsAny(p, "*?[") {
+			out = append(out, p)
+			continue
+		}
+		p = strings.TrimPrefix(p, ".")
+		if p == "" {
+			continue
+		}
+		out = append(out, "*."+p)
+	}
+	return out
 }
 
 func (f *Filter) Empty() bool {

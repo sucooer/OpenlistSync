@@ -518,6 +518,12 @@ html, body {
 .log-line.error .log-msg { color: var(--red); }
 .log-line.ok .log-msg { color: var(--green); }
 
+/* Indicator in the logs card sub-line: subtle color changes so the user
+   can tell at a glance whether new logs will yank them back to bottom. */
+#log-stick-state { transition: color 0.18s ease; font-weight: 500; }
+#log-stick-state.paused { color: var(--amber); }
+#log-stick-state.off { color: var(--text-tertiary); }
+
 /* ---------- Toast ---------- */
 
 .toast {
@@ -558,7 +564,28 @@ html, body {
 .hidden { display: none !important; }
 
 /* Detail line in overview task cards */
-.task-detail { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; }
+.task-detail {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.task-detail .row-body { min-width: 0; }
+.task-detail .row-sub { overflow-wrap: anywhere; }
+.task-detail .task-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 0 0 auto;
+  text-align: right;
+}
+.task-detail .task-status .small { white-space: nowrap; }
+
+/* 2-column layout for overview task grid; falls back to a single column on
+   narrow viewports because the auto-fill min-width is then unreachable. */
+.task-cards { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
@@ -641,6 +668,15 @@ html, body {
   }
 
   .log-console { max-height: calc(100vh - 300px); }
+
+  /* Overview task cards become an easy-to-tap list with status on top */
+  .task-detail {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+  .task-detail > div:last-child {
+    text-align: left;
+  }
 }
 
 @keyframes sheetUp {
