@@ -189,14 +189,22 @@ html, body {
 /* ---------- Stat grid ---------- */
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
-.stat {
-  padding: 18px 20px;
-  display: flex; flex-direction: column; gap: 10px;
+.stat-card { padding: 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat-cell {
+  padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  border-right: 1px solid var(--separator);
 }
-.stat .stat-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 500; }
-.stat .stat-value { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
-.stat .stat-value small { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-left: 4px; }
-.stat .stat-icon { color: var(--accent); }
+.stat-cell:last-child { border-right: none; }
+.stat-cell .stat-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 500; }
+.stat-cell .stat-value { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+.stat-cell .stat-value small { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-left: 4px; }
+@media (max-width: 720px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-cell:nth-child(2n) { border-right: none; }
+  .stat-cell:nth-child(-n+2) { border-bottom: 1px solid var(--separator); }
+}
 
 /* ---------- Buttons ---------- */
 

@@ -297,23 +297,24 @@ function renderOverview() {
   const view = $("#view");
 
   const stats = `
-    <div class="grid">
-      <div class="card stat">
-        <span class="stat-label">OpenList 连接</span>
-        <span class="stat-value"><span class="stat-icon">${ICONS.server.replace('width="20"','width="22"')}</span></span>
-        <span class="stat-value">${state.connections.length}</span>
-      </div>
-      <div class="card stat">
-        <span class="stat-label">同步任务</span>
-        <span class="stat-value">${state.tasks.length} <small>启用 ${enabled}</small></span>
-      </div>
-      <div class="card stat">
-        <span class="stat-label">运行中</span>
-        <span class="stat-value" style="color:${running ? "var(--amber)" : "var(--text)"}">${running}</span>
-      </div>
-      <div class="card stat">
-        <span class="stat-label">最近成功</span>
-        <span class="stat-value">${okCount}<small>/ ${state.tasks.length}</small></span>
+    <div class="card stat-card">
+      <div class="stat-grid">
+        <div class="stat-cell">
+          <span class="stat-label">OpenList 连接</span>
+          <span class="stat-value">${state.connections.length}</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">同步任务</span>
+          <span class="stat-value">${state.tasks.length} <small>启用 ${enabled}</small></span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">运行中</span>
+          <span class="stat-value" style="color:${running ? "var(--amber)" : "var(--text)"}">${running}</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">最近成功</span>
+          <span class="stat-value">${okCount}<small>/ ${state.tasks.length}</small></span>
+        </div>
       </div>
     </div>`;
 
