@@ -923,7 +923,7 @@ function browseRemote() {
 }
 
 function browseLocal() {
-  browse = { kind: "local", conn: "", path: "/data" };
+  browse = { kind: "local", conn: "", path: "/" };
   $("#dir-title").textContent = "选择本地目录";
   openDirBrowser();
 }

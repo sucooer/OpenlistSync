@@ -172,7 +172,7 @@ func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFSLocal(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Query().Get("path")
 	if p == "" {
-		p = "/data"
+		p = "/"
 	}
 	clean := filepath.Clean(p)
 	if !filepath.IsAbs(clean) {
