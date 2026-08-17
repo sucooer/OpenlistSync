@@ -9,9 +9,13 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"openlist-sync/internal/client"
 )
@@ -92,6 +96,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/settings/save", s.requireAuth(s.handleSettingsSave))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/logs/clear", s.requireAuth(s.handleLogsClear))
+	mux.HandleFunc("/api/fs/list", s.requireAuth(s.handleFSList))
+	mux.HandleFunc("/api/fs/local", s.requireAuth(s.handleFSLocal))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 	})
@@ -115,6 +121,75 @@ func (s *Server) Routes() http.Handler {
 	})
 
 	return mux
+}
+
+// fsItem is a single entry in a directory browser listing.
+type fsItem struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+}
+
+func sortFSItems(items []fsItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsDir != items[j].IsDir {
+			return items[i].IsDir
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+}
+
+// handleFSList browses a remote OpenList directory through a connection.
+func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ConnectionID string `json:"connection_id"`
+		Path         string `json:"path"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	conn := s.store.Connection(body.ConnectionID)
+	if conn == nil {
+		jsonErr(w, http.StatusBadRequest, "连接不存在")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	cl := client.New(strings.TrimRight(conn.BaseURL, "/"), conn.Token, conn.Username, conn.Password, conn.DownloadMode == "proxy", func(string, ...any) {})
+	objs, err := cl.ListAll(ctx, body.Path)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "获取远端目录失败: "+err.Error())
+		return
+	}
+	items := make([]fsItem, 0, len(objs))
+	for _, o := range objs {
+		items = append(items, fsItem{Name: o.Name, IsDir: o.IsDir})
+	}
+	sortFSItems(items)
+	jsonOK(w, map[string]any{"path": body.Path, "items": items})
+}
+
+// handleFSLocal browses a local directory on the server.
+func (s *Server) handleFSLocal(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		p = "/"
+	}
+	clean := filepath.Clean(p)
+	if !filepath.IsAbs(clean) {
+		jsonErr(w, http.StatusBadRequest, "路径必须是绝对路径")
+		return
+	}
+	entries, err := os.ReadDir(clean)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "无法读取目录: "+err.Error())
+		return
+	}
+	items := make([]fsItem, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, fsItem{Name: e.Name(), IsDir: e.IsDir()})
+	}
+	sortFSItems(items)
+	jsonOK(w, map[string]any{"path": clean, "items": items})
 }
 
 // ---- state ----

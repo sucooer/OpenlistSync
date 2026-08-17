@@ -382,6 +382,41 @@ html, body {
 .confirm-sheet p { color: var(--text-secondary); font-size: 14px; margin-top: 8px; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
 
+/* ---------- Directory browser ---------- */
+
+.dir-sheet { width: min(480px, calc(100vw - 32px)); }
+.dir-crumb {
+  display: flex; flex-wrap: wrap; gap: 2px; align-items: center;
+  font-size: 13px; padding: 2px 2px 12px;
+}
+.dir-crumb .crumb {
+  background: none; border: none; padding: 3px 6px;
+  color: var(--accent); font-size: 13px; cursor: pointer; border-radius: 6px;
+}
+.dir-crumb .crumb:hover { background: var(--fill-1); }
+.dir-crumb .sep { color: var(--text-tertiary); user-select: none; }
+.dir-list {
+  max-height: 42vh; overflow-y: auto;
+  border: 1px solid var(--hairline); border-radius: 12px;
+  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface-solid);
+}
+.dir-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 8px;
+  font-size: 14px; color: var(--text);
+  background: none; border: none; width: 100%; text-align: left; cursor: pointer;
+}
+.dir-item:hover { background: var(--fill-1); }
+.dir-item.file { color: var(--text-secondary); cursor: default; }
+.dir-item.file:hover { background: none; }
+.dir-item svg { flex: none; color: var(--accent); }
+.dir-item.file svg { color: var(--text-tertiary); }
+.dir-empty { padding: 22px 10px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+
+.path-row { display: flex; gap: 8px; align-items: center; }
+.path-row .field { flex: 1; }
+
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes sheetIn {
   from { opacity: 0; transform: translateY(24px) scale(0.97); }
@@ -588,12 +623,20 @@ html, body {
     animation: sheetUp 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .confirm-sheet { width: min(400px, calc(100vw - 32px)); border-radius: 22px; padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+  .dir-sheet { width: min(480px, calc(100vw - 32px)); }
 
   /* 认证弹窗(登录)始终居中,不做底部抽屉 */
   #login-backdrop { place-items: center; }
   #login-backdrop .sheet {
     border-radius: var(--radius-lg);
     padding-bottom: 26px;
+    animation: sheetIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* 目录浏览器同样居中 */
+  #dir-backdrop { place-items: center; }
+  #dir-backdrop .sheet {
+    border-radius: var(--radius-lg);
+    padding-bottom: 24px;
     animation: sheetIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   }
 

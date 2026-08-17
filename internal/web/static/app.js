@@ -55,6 +55,8 @@ const ICONS = {
   task: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>',
   arrow: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>',
   paused: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  file: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>',
 };
 
 /* ---------- API ---------- */
@@ -666,11 +668,17 @@ function taskForm(id) {
     </div>
     <div class="form-group">
       <label class="form-label">远端路径 <span class="req">*</span></label>
-      <input class="field mono" id="task-remote" placeholder="/backup 或 /" value="${esc(t.remote_path || "")}">
+      <div class="path-row">
+        <input class="field mono" id="task-remote" placeholder="/backup 或 /" value="${esc(t.remote_path || "")}">
+        <button class="btn" type="button" onclick="browseRemote()" title="浏览远端目录">${ICONS.folder} 浏览</button>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">本地目录 <span class="req">*</span></label>
-      <input class="field mono" id="task-local" placeholder="/data/backup" value="${esc(t.local_dir || "")}">
+      <div class="path-row">
+        <input class="field mono" id="task-local" placeholder="/data/backup" value="${esc(t.local_dir || "")}">
+        <button class="btn" type="button" onclick="browseLocal()" title="浏览本机目录">${ICONS.folder} 浏览</button>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">同步方向</label>
@@ -901,6 +909,103 @@ async function saveSettings() {
     loadState();
   } catch (e) { toast(e.message, "error"); }
 }
+
+/* ---------- 目录浏览器 ---------- */
+
+let browse = null; // { kind: "remote"|"local", conn: id, path: string }
+
+function browseRemote() {
+  const conn = $("#task-conn").value;
+  if (!conn) { toast("请先在表单中选择 OpenList 连接", "error"); return; }
+  browse = { kind: "remote", conn, path: "/" };
+  $("#dir-title").textContent = "选择远端目录";
+  openDirBrowser();
+}
+
+function browseLocal() {
+  browse = { kind: "local", conn: "", path: "/" };
+  $("#dir-title").textContent = "选择本地目录";
+  openDirBrowser();
+}
+
+function openDirBrowser() {
+  $("#dir-crumb").innerHTML = "";
+  $("#dir-list").innerHTML = `<div class="dir-empty">加载中…</div>`;
+  $("#dir-backdrop").hidden = false;
+  goDir();
+}
+
+function closeDirBrowser() {
+  $("#dir-backdrop").hidden = true;
+  browse = null;
+}
+
+function joinPath(base, name) {
+  return base === "/" ? "/" + name : base.replace(/\/+$/, "") + "/" + name;
+}
+
+function crumbSegs(path) {
+  const segs = [{ label: "根目录", p: "/" }];
+  if (path && path !== "/") {
+    let acc = "";
+    for (const pt of path.split("/").filter(Boolean)) {
+      acc += "/" + pt;
+      segs.push({ label: pt, p: acc });
+    }
+  }
+  return segs;
+}
+
+async function goDir() {
+  if (!browse) return;
+  const { kind, conn, path } = browse;
+  const crumbEl = $("#dir-crumb");
+  const listEl = $("#dir-list");
+  crumbEl.innerHTML = crumbSegs(path).map((s, i) =>
+    `${i > 0 ? '<span class="sep">/</span>' : ""}<button class="crumb" data-path="${esc(s.p)}">${esc(s.label)}</button>`
+  ).join("");
+  listEl.innerHTML = `<div class="dir-empty">加载中…</div>`;
+  try {
+    const data = kind === "remote"
+      ? await api("/api/fs/list", "POST", { connection_id: conn, path })
+      : await api("/api/fs/local?path=" + encodeURIComponent(path));
+    const dirs = data.items.filter((it) => it.is_dir);
+    const files = data.items.filter((it) => !it.is_dir);
+    if (dirs.length + files.length === 0) {
+      listEl.innerHTML = `<div class="dir-empty">此目录为空</div>`;
+      return;
+    }
+    listEl.innerHTML =
+      dirs.map((d) =>
+        `<button class="dir-item" data-path="${esc(joinPath(path, d.name))}">${ICONS.folder}${esc(d.name)}</button>`
+      ).join("") +
+      files.map((f) =>
+        `<div class="dir-item file">${ICONS.file}${esc(f.name)}</div>`
+      ).join("");
+  } catch (err) {
+    listEl.innerHTML = `<div class="dir-empty">加载失败: ${esc(err.message)}</div>`;
+  }
+}
+
+function pickDir() {
+  if (!browse) return;
+  const input = $("#" + (browse.kind === "remote" ? "task-remote" : "task-local"));
+  input.value = browse.path;
+  closeDirBrowser();
+  input.focus();
+}
+
+$("#dir-backdrop").addEventListener("click", (e) => { if (e.target === $("#dir-backdrop")) closeDirBrowser(); });
+$("#dir-cancel").addEventListener("click", closeDirBrowser);
+$("#dir-pick").addEventListener("click", pickDir);
+$("#dir-crumb").addEventListener("click", (e) => {
+  const b = e.target.closest(".crumb");
+  if (b && browse) { browse.path = b.dataset.path; goDir(); }
+});
+$("#dir-list").addEventListener("click", (e) => {
+  const b = e.target.closest(".dir-item");
+  if (b && browse) { browse.path = b.dataset.path; goDir(); }
+});
 
 /* ---------- init ---------- */
 
