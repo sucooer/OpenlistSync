@@ -59,17 +59,66 @@ const ICONS = {
 
 /* ---------- API ---------- */
 
+const API_TOKEN_KEY = "openlist.apiToken";
+let apiToken = localStorage.getItem(API_TOKEN_KEY) || "";
+let loginPending = null;
+let loginSuppressedUntil = 0;
+
+class AuthError extends Error {}
+
 async function api(path, method = "GET", body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  if (apiToken) opts.headers["X-API-Token"] = apiToken;
+  let res = await fetch(path, opts);
+  if (res.status === 401 && Date.now() >= loginSuppressedUntil) {
+    const tok = await loginPrompt();
+    if (tok) {
+      apiToken = tok;
+      localStorage.setItem(API_TOKEN_KEY, apiToken);
+      opts.headers["X-API-Token"] = apiToken;
+      res = await fetch(path, opts);
+    } else {
+      loginSuppressedUntil = Date.now() + 30000;
+    }
+  }
+  if (res.status === 401) throw new AuthError("unauthorized: invalid API token");
   let data = null;
   try { data = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error(data?.error || `请求失败 (${res.status})`);
   return data;
+}
+
+function loginPrompt() {
+  if (loginPending) return loginPending;
+  const bd = $("#login-backdrop");
+  const input = $("#login-token");
+  const okBtn = $("#login-ok");
+  const cancelBtn = $("#login-cancel");
+  const close = () => {
+    bd.hidden = true;
+    okBtn.onclick = null;
+    cancelBtn.onclick = null;
+    input.onkeydown = null;
+  };
+  loginPending = new Promise((resolve) => {
+    bd.hidden = false;
+    input.value = "";
+    setTimeout(() => input.focus(), 60);
+    const submit = (e) => {
+      e.preventDefault();
+      const v = input.value.trim();
+      close();
+      resolve(v);
+    };
+    okBtn.onclick = submit;
+    cancelBtn.onclick = () => { close(); resolve(""); };
+    input.onkeydown = (e) => { if (e.key === "Enter") submit(e); };
+  }).finally(() => { loginPending = null; });
+  return loginPending;
 }
 
 async function loadState() {
@@ -84,6 +133,7 @@ async function loadState() {
     updateSidebarStatus();
     render();
   } catch (e) {
+    if (e instanceof AuthError) return;
     toast(e.message, "error");
   }
 }
