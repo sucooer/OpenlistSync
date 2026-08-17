@@ -9,7 +9,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/openlist-sync ./cmd/openlist-sync
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata util-linux \
+RUN apk add --no-cache ca-certificates tzdata util-linux inotify-tools \
     && adduser -D -u 10001 openlist \
     && mkdir -p /data
 COPY --from=build /out/openlist-sync /usr/local/bin/openlist-sync
