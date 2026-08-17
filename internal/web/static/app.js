@@ -923,7 +923,7 @@ function browseRemote() {
 }
 
 function browseLocal() {
-  browse = { kind: "local", conn: "", path: "/" };
+  browse = { kind: "local", conn: "", path: "/data" };
   $("#dir-title").textContent = "选择本地目录";
   openDirBrowser();
 }
@@ -969,8 +969,10 @@ async function goDir() {
     const data = kind === "remote"
       ? await api("/api/fs/list", "POST", { connection_id: conn, path })
       : await api("/api/fs/local?path=" + encodeURIComponent(path));
-    const dirs = data.items.filter((it) => it.is_dir);
-    const files = data.items.filter((it) => !it.is_dir);
+    if (data.error) toast(data.error, "error");
+    const items = data.items || [];
+    const dirs = items.filter((it) => it.is_dir);
+    const files = items.filter((it) => !it.is_dir);
     if (dirs.length + files.length === 0) {
       listEl.innerHTML = `<div class="dir-empty">此目录为空</div>`;
       return;

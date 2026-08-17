@@ -172,7 +172,7 @@ func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFSLocal(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Query().Get("path")
 	if p == "" {
-		p = "/"
+		p = "/data"
 	}
 	clean := filepath.Clean(p)
 	if !filepath.IsAbs(clean) {
@@ -180,16 +180,23 @@ func (s *Server) handleFSLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entries, err := os.ReadDir(clean)
-	if err != nil {
+	var items []fsItem
+	if err != nil && entries == nil {
 		jsonErr(w, http.StatusBadGateway, "无法读取目录: "+err.Error())
 		return
 	}
-	items := make([]fsItem, 0, len(entries))
 	for _, e := range entries {
 		items = append(items, fsItem{Name: e.Name(), IsDir: e.IsDir()})
 	}
+	if items == nil {
+		items = []fsItem{}
+	}
 	sortFSItems(items)
-	jsonOK(w, map[string]any{"path": clean, "items": items})
+	resp := map[string]any{"path": clean, "items": items}
+	if err != nil {
+		resp["error"] = err.Error()
+	}
+	jsonOK(w, resp)
 }
 
 // ---- state ----
