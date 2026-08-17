@@ -2,3 +2,4 @@ dist/
 data/
 *.part
 .DS_Store
+.env.playwright-cli/

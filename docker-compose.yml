@@ -4,19 +4,9 @@ services:
     container_name: openlist-sync
     restart: unless-stopped
     ports:
-      # Web 界面端口(容器默认监听 18222,与二进制默认一致)
       - "18222:18222"
     volumes:
-      # 同步数据:任务里的本地目录(如 /data/backup)存在数据卷,重建容器不丢备份
-      - data:/data
-      # 配置:UI 里配置的连接/任务保存在该卷下的 openlist-sync.json,重建容器不丢配置
-      - config:/etc/openlist-sync
+      - ./data:/data
     environment:
-      # 配置文件路径(容器内非 root 用户无写权限的工作目录,必须显式指定)
-      WEB_STORE: "/etc/openlist-sync/openlist-sync.json"
       # 可选 API Token,留空则不需要登录
       WEB_API_TOKEN: ${WEB_API_TOKEN:-}
-
-volumes:
-  data:
-  config:

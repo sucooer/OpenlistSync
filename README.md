@@ -34,10 +34,12 @@ docker compose up -d
 # 打开 http://localhost:18222
 ```
 
-数据与配置保存在 Docker named volume 中,重建容器不丢失。可选设置访问令牌:
+数据与配置统一存放在宿主机 `./data` 目录(配置文件为 `./data/openlist-sync.json`,任务同步目录默认也是 `/data/backup` 之类的容器内路径),重建容器不丢失。容器启动时会自动将该目录属主修正为容器内用户,无需手动 chown。
+
+可选设置访问令牌(复制示例并填写):
 
 ```bash
-export WEB_API_TOKEN=your-token
+cp .env.example .env   # 编辑 .env 填入 WEB_API_TOKEN
 ```
 
 ### 二进制
@@ -67,13 +69,14 @@ openlist-sync daemon \
 ### Docker 命令行
 
 ```bash
+# 依赖镜像内默认工作目录 /data,配置文件自动落在数据目录,无需指定 WEB_STORE
 docker run -d --name openlist-sync \
   -p 18222:18222 \
-  -e WEB_STORE=/etc/openlist-sync/openlist-sync.json \
-  -v openlistsync_data:/data \
-  -v openlistsync_config:/etc/openlist-sync \
-  openlist-sync:latest
+  -v "$PWD/data:/data" \
+  anyear/openlist-sync:latest
 ```
+
+> 容器入口自动修正挂载目录属主(uid 10001)后降权运行,无需手动 chown。
 
 ## 配置
 
@@ -84,7 +87,7 @@ docker run -d --name openlist-sync \
 | 环境变量 | 说明 | 默认 |
 | --- | --- | --- |
 | `WEB_LISTEN` | HTTP 监听地址 | `:18222` |
-| `WEB_STORE` | 配置文件路径 | `openlist-sync.json` |
+| `WEB_STORE` | 配置文件路径(默认相对工作目录 `/data`) | `openlist-sync.json` |
 | `WEB_API_TOKEN` | 访问令牌(留空则无需认证) | 空 |
 
 ### 命令行 / daemon 模式

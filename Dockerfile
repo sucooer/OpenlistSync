@@ -9,13 +9,14 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/openlist-sync ./cmd/openlist-sync
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata util-linux \
     && adduser -D -u 10001 openlist \
-    && mkdir -p /data /etc/openlist-sync \
-    && chown -R openlist:openlist /data /etc/openlist-sync
+    && mkdir -p /data
 COPY --from=build /out/openlist-sync /usr/local/bin/openlist-sync
-USER openlist
-VOLUME ["/data", "/etc/openlist-sync"]
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+WORKDIR /data
+VOLUME ["/data"]
 EXPOSE 18222
-ENTRYPOINT ["openlist-sync"]
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["web"]
