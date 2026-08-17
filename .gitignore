@@ -2,4 +2,6 @@ dist/
 data/
 *.part
 .DS_Store
-.env.playwright-cli/
+.env
+docker-compose.override.yml
+.playwright-cli/
