@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -170,7 +171,9 @@ func (r *Runner) execute(ctx context.Context, t *Task) {
 		logf("任务完成 (%s)", dur)
 		r.store.UpdateTaskStatus(t.ID, "ok", "", "", time.Now())
 	}
-	_ = r.store.Save()
+	if err := r.store.Save(); err != nil {
+		log.Printf("保存配置失败: %v", err)
+	}
 }
 
 // parseDurFlex parses Go durations plus a friendly "1d" (days) suffix.

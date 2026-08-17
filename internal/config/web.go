@@ -20,7 +20,7 @@ func ParseWeb(args []string) (*WebConfig, error) {
 		fmt.Fprintf(fs.Output(), "Usage: openlist-sync web [flags]\n\nWeb 管理界面 + 调度器 (OpenListSync server)\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
-	listen := fs.String("listen", envStr("WEB_LISTEN", ":18222"), "HTTP listen address")
+	listen := fs.String("listen", envStr("WEB_LISTEN", "127.0.0.1:18222"), "HTTP listen address")
 	store := fs.String("store", envStr("WEB_STORE", "openlist-sync.json"), "config storage file (created if missing)")
 	token := fs.String("api-token", envStr("WEB_API_TOKEN", ""), "API token for the web UI (empty = no auth)")
 	if err := fs.Parse(args); err != nil {

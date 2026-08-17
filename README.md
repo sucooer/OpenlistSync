@@ -36,7 +36,7 @@ docker compose up -d
 
 数据与配置统一存放在宿主机 `./data` 目录(配置文件为 `./data/openlist-sync.json`,任务同步目录默认也是 `/data/backup` 之类的容器内路径),重建容器不丢失。容器启动时会自动将该目录属主修正为容器内用户,无需手动 chown。
 
-可选设置访问令牌(复制示例并填写):
+> **安全默认**:Web 界面默认仅绑定本机(compose 端口映射 `127.0.0.1:18222`;二进制默认监听 `127.0.0.1`),不配 token 也不对外暴露。只需本机访问则保持默认即可;需局域网访问时把端口映射改为 `"18222:18222"`;**需公网暴露时务必设置访问令牌**:
 
 ```bash
 cp .env.example .env   # 编辑 .env 填入 WEB_API_TOKEN
@@ -86,7 +86,7 @@ docker run -d --name openlist-sync \
 
 | 环境变量 | 说明 | 默认 |
 | --- | --- | --- |
-| `WEB_LISTEN` | HTTP 监听地址 | `:18222` |
+| `WEB_LISTEN` | HTTP 监听地址 | `127.0.0.1:18222`(仅本机) |
 | `WEB_STORE` | 配置文件路径(默认相对工作目录 `/data`) | `openlist-sync.json` |
 | `WEB_API_TOKEN` | 访问令牌(留空则无需认证) | 空 |
 

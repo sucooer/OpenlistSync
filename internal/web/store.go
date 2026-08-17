@@ -117,7 +117,11 @@ func (s *Store) Save() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0o600)
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
 }
 
 func dirOf(p string) string {

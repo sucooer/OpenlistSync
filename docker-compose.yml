@@ -4,9 +4,17 @@ services:
     container_name: openlist-sync
     restart: unless-stopped
     ports:
-      - "18222:18222"
+      # 默认仅本机可访问(自用安全,不配 token 也不外露)。
+      # 需局域网访问:改为 "18222:18222";需公网暴露:必须设置 WEB_API_TOKEN。
+      - "127.0.0.1:18222:18222"
     volumes:
+      # 数据与配置统一放宿主机 ./data:UI 配置存 ./data/openlist-sync.json,
+      # 任务同步目录也在此,重建容器不丢。
+      # 容器启动时自动将本目录属主修正为 uid 10001,无需手动 chown。
       - ./data:/data
     environment:
+      # 容器内监听全接口(宿主机侧已由 ports 限制为本机);
+      # 二进制直接运行时默认仅监听 127.0.0.1,无需设置此项
+      WEB_LISTEN: ":18222"
       # 可选 API Token,留空则不需要登录
       WEB_API_TOKEN: ${WEB_API_TOKEN:-}
