@@ -196,7 +196,11 @@ func (c *Client) doJSON(ctx context.Context, method, apiPath string, body any, o
 			continue
 		}
 		if resp.StatusCode != 200 || env.Code != 200 {
-			return fmt.Errorf("%s %s: code=%d message=%s", method, apiPath, env.Code, env.Message)
+			msg := env.Message
+			if strings.Contains(strings.ToLower(msg), "storage not found") {
+				msg += " (OpenList 无法将这个路径归到任何已挂载的存储根；检查连接配置或在 OpenList 后台确认 storage 列表里包含该路径)"
+			}
+			return fmt.Errorf("%s %s: code=%d message=%s", method, apiPath, env.Code, msg)
 		}
 		if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
 			if err := json.Unmarshal(env.Data, out); err != nil {

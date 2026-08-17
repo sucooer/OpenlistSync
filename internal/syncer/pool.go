@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math"
 	"sync"
@@ -112,12 +113,18 @@ func (r *rateReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Pool runs functions concurrently, returning the failure count.
-func runPool(ctx context.Context, workers int, fns []func(ctx context.Context) error) int {
+// runPool runs functions concurrently and returns (failure count, first real error).
+//
+// "Real error" is the first non-nil error that isn't a context cancellation /
+// deadline — that way the caller can report the actual reason uploads or
+// downloads failed without context-cancel noise (e.g. when the user hits Stop).
+func runPool(ctx context.Context, workers int, fns []func(ctx context.Context) error) (int, error) {
 	if workers < 1 {
 		workers = 1
 	}
 	var fail atomic.Int32
+	var firstErr error
+	var firstErrMu sync.Mutex
 	ch := make(chan func(ctx context.Context) error)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -130,6 +137,14 @@ func runPool(ctx context.Context, workers int, fns []func(ctx context.Context) e
 				}
 				if err := fn(ctx); err != nil {
 					fail.Add(1)
+					if isCtxErr(err) {
+						continue
+					}
+					firstErrMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					firstErrMu.Unlock()
 				}
 			}
 		}()
@@ -142,5 +157,9 @@ func runPool(ctx context.Context, workers int, fns []func(ctx context.Context) e
 	}
 	close(ch)
 	wg.Wait()
-	return int(fail.Load())
+	return int(fail.Load()), firstErr
+}
+
+func isCtxErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

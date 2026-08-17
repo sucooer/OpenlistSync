@@ -96,7 +96,7 @@ func (s *Syncer) syncTask(ctx context.Context, t config.Task) error {
 	}
 
 	// phase 1: remote dirs first (uploads rely on them), then local dirs
-	dirs := &remoteDirMaker{c: s.client, created: map[string]bool{}}
+	dirs := newRemoteDirMaker(s.client, s.logf)
 	for _, j := range plan.Jobs {
 		if j.Kind != JobMkdirRemote {
 			continue
@@ -125,8 +125,9 @@ func (s *Syncer) syncTask(ctx context.Context, t config.Task) error {
 			return s.withRetry(ctx, func() error { return s.downloadOne(ctx, t, j) })
 		})
 	}
-	if n := runPool(ctx, s.cfg.Concurrency, dlFns); n > 0 {
-		s.logf("  %d download(s) failed", n)
+	dlFails, dlErr := runPool(ctx, s.cfg.Concurrency, dlFns)
+	if dlFails > 0 {
+		s.logf("  %d download(s) failed", dlFails)
 	}
 
 	// phase 3: uploads in parallel
@@ -140,8 +141,15 @@ func (s *Syncer) syncTask(ctx context.Context, t config.Task) error {
 			return s.withRetry(ctx, func() error { return s.uploadOne(ctx, t, dirs, j) })
 		})
 	}
-	if n := runPool(ctx, s.cfg.Concurrency, upFns); n > 0 {
-		s.logf("  %d upload(s) failed", n)
+	upFails, upErr := runPool(ctx, s.cfg.Concurrency, upFns)
+	if upFails > 0 {
+		s.logf("  %d upload(s) failed", upFails)
+	}
+
+	// Surface transfer failures so the runner marks the task as "error" rather
+	// than "ok" — otherwise the green badge would lie to the operator.
+	if dlFails > 0 || upFails > 0 {
+		return fmt.Errorf("transfer phase: %s", formatTransferErrors(dlFails, dlErr, upFails, upErr))
 	}
 
 	// phase 4: removals
@@ -327,12 +335,32 @@ type remoteDirMaker struct {
 	c       *client.Client
 	mu      sync.Mutex
 	created map[string]bool
+	warned  map[string]bool // paths whose mkdir we already logged as benign
+	logf    func(string, ...any)
 }
 
+func newRemoteDirMaker(c *client.Client, logf func(string, ...any)) *remoteDirMaker {
+	return &remoteDirMaker{
+		c:       c,
+		created: map[string]bool{},
+		warned:  map[string]bool{},
+		logf:    logf,
+	}
+}
+
+// Ensure makes sure dir exists on remote, walking parent by parent. Errors that
+// suggest the storage backing this path can't host new subdirectories (e.g.
+// OpenList's "storage not found" during mkdir) are demoted to a one-line
+// warning and treated as "presumed present" — the subsequent PUT will surface a
+// more specific per-file error if the storage really is read-only. This stops
+// mkdir hiccups from masking the real failure for an entire batch of uploads.
 func (m *remoteDirMaker) Ensure(ctx context.Context, dir string) error {
 	parts := strings.Split(strings.Trim(dir, "/"), "/")
 	cur := ""
 	for _, p := range parts {
+		if p == "" {
+			continue
+		}
 		cur = path.Join(cur, p)
 		m.mu.Lock()
 		if m.created[cur] {
@@ -341,10 +369,19 @@ func (m *remoteDirMaker) Ensure(ctx context.Context, dir string) error {
 		}
 		m.mu.Unlock()
 		if err := m.c.Mkdir(ctx, cur); err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			msg := strings.ToLower(err.Error())
+			if strings.Contains(msg, "already exists") {
 				m.mu.Lock()
 				m.created[cur] = true
 				m.mu.Unlock()
+				continue
+			}
+			if isIgnorableMkdirErr(msg) {
+				m.mu.Lock()
+				m.warned[cur] = true
+				m.created[cur] = true
+				m.mu.Unlock()
+				m.logf("  ⚠ mkdir %s 跳过(底层存储拒绝创建子目录): %v", cur, err)
 				continue
 			}
 			return err
@@ -354,6 +391,18 @@ func (m *remoteDirMaker) Ensure(ctx context.Context, dir string) error {
 		m.mu.Unlock()
 	}
 	return nil
+}
+
+// isIgnorableMkdirErr returns true for mkdir errors that don't represent a
+// transient failure — they signal that the storage backing this path can't
+// host new subdirs (read-only, virtual, or unmapped). Surfacing them as fatal
+// would mask the per-file PUT error that follows.
+func isIgnorableMkdirErr(msg string) bool {
+	return strings.Contains(msg, "storage not found") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "read only") ||
+		strings.Contains(msg, "read-only") ||
+		strings.Contains(msg, "not allow")
 }
 
 func humanSize(n int64) string {
@@ -367,4 +416,27 @@ func humanSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// formatTransferErrors turns (downloadCount, downloadErr, uploadCount, uploadErr)
+// into a one-line summary suitable for the task's last_error.
+// Each non-empty phase is appended with its first error (if any); phases
+// without a captured error (e.g. cancelled) still appear by count only.
+func formatTransferErrors(dlFails int, dlErr error, upFails int, upErr error) string {
+	var parts []string
+	if dlFails > 0 {
+		s := fmt.Sprintf("%d download(s) failed", dlFails)
+		if dlErr != nil {
+			s += ": " + dlErr.Error()
+		}
+		parts = append(parts, s)
+	}
+	if upFails > 0 {
+		s := fmt.Sprintf("%d upload(s) failed", upFails)
+		if upErr != nil {
+			s += ": " + upErr.Error()
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "; ")
 }

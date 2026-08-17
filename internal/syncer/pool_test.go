@@ -49,9 +49,9 @@ func TestRunPoolRunsAll(t *testing.T) {
 			return nil
 		})
 	}
-	fails := runPool(context.Background(), 5, fns)
-	if fails != 0 || n.Load() != 20 {
-		t.Fatalf("fails=%d ran=%d", fails, n.Load())
+	fails, err := runPool(context.Background(), 5, fns)
+	if fails != 0 || n.Load() != 20 || err != nil {
+		t.Fatalf("fails=%d ran=%d err=%v", fails, n.Load(), err)
 	}
 }
 
@@ -62,8 +62,97 @@ func TestRunPoolCountsFailures(t *testing.T) {
 			return fmt.Errorf("boom")
 		})
 	}
-	if fails := runPool(context.Background(), 2, fns); fails != 4 {
+	fails, err := runPool(context.Background(), 2, fns)
+	if fails != 4 {
 		t.Fatalf("expected 4 failures, got %d", fails)
+	}
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("expected first error 'boom', got %v", err)
+	}
+}
+
+func TestRunPoolFiltersContextErrors(t *testing.T) {
+	// Mix of real errors and context.Canceled; the real error must surface,
+	// the context cancellation must NOT be reported as the run's failure cause.
+	fns := []func(ctx context.Context) error{
+		func(ctx context.Context) error { return context.Canceled },
+		func(ctx context.Context) error { return fmt.Errorf("disk full") },
+		func(ctx context.Context) error { return context.DeadlineExceeded },
+	}
+	fails, err := runPool(context.Background(), 3, fns)
+	if fails != 3 {
+		t.Fatalf("expected all 3 to count as fail, got %d", fails)
+	}
+	if err == nil || err.Error() != "disk full" {
+		t.Fatalf("first non-ctx error should be 'disk full', got %v", err)
+	}
+}
+
+func TestRunPoolNoErrorOnAllSuccess(t *testing.T) {
+	fns := []func(ctx context.Context) error{
+		func(ctx context.Context) error { return nil },
+		func(ctx context.Context) error { return nil },
+	}
+	fails, err := runPool(context.Background(), 2, fns)
+	if fails != 0 || err != nil {
+		t.Fatalf("all success should yield 0 fails, nil err; got fails=%d err=%v", fails, err)
+	}
+}
+
+func TestFormatTransferErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		dlFail  int
+		dlErr   error
+		upFail  int
+		upErr   error
+		wantHas []string
+	}{
+		{
+			name:    "only uploads",
+			upFail:  3,
+			upErr:   fmt.Errorf("403 forbidden"),
+			wantHas: []string{"3 upload(s) failed", "403 forbidden"},
+		},
+		{
+			name:    "only downloads",
+			dlFail:  2,
+			dlErr:   fmt.Errorf("connection reset"),
+			wantHas: []string{"2 download(s) failed", "connection reset"},
+		},
+		{
+			name:    "both phases",
+			dlFail:  1,
+			dlErr:   fmt.Errorf("timeout"),
+			upFail:  4,
+			upErr:   fmt.Errorf("permission denied"),
+			wantHas: []string{"1 download(s) failed", "timeout", "4 upload(s) failed", "permission denied"},
+		},
+		{
+			name:    "no captured error message",
+			upFail:  2,
+			wantHas: []string{"2 upload(s) failed"},
+		},
+		{
+			name:    "no failures",
+			wantHas: []string{""}, // empty string is the documented "all OK" signal
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := formatTransferErrors(c.dlFail, c.dlErr, c.upFail, c.upErr)
+			for _, want := range c.wantHas {
+				if want == "" {
+					if got != "" {
+						t.Fatalf("expected empty string, got %q", got)
+					}
+					continue
+				}
+				if !strings.Contains(got, want) {
+					t.Fatalf("output %q should contain %q", got, want)
+				}
+			}
+		})
 	}
 }
 
