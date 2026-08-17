@@ -587,7 +587,15 @@ html, body {
     padding-bottom: env(safe-area-inset-bottom);
     animation: sheetUp 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .confirm-sheet { border-radius: 22px; padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+  .confirm-sheet { width: min(400px, calc(100vw - 32px)); border-radius: 22px; padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+
+  /* 认证弹窗(登录)始终居中,不做底部抽屉 */
+  #login-backdrop { place-items: center; }
+  #login-backdrop .sheet {
+    border-radius: var(--radius-lg);
+    padding-bottom: 26px;
+    animation: sheetIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
 
   .log-console { max-height: calc(100vh - 300px); }
 }
