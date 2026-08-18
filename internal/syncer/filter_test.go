@@ -59,6 +59,18 @@ func TestNewFilterPreservesExistingGlobs(t *testing.T) {
 	}
 }
 
+func TestNewFilterMatchesNestedLocalFileByBasename(t *testing.T) {
+	f := NewFilter([]string{"jpg", "json", "nfo"}, nil, nil)
+	for _, name := range []string{"album/cover.jpg", "album/info.json", "album/movie.nfo"} {
+		if !f.MatchLocal(name) {
+			t.Fatalf("nested %q should match extension filter", name)
+		}
+	}
+	if f.MatchLocal("album/movie.mkv") {
+		t.Fatal("nested non-matching extension should be filtered out")
+	}
+}
+
 func TestNewFilterTypeIntegrationStillWorks(t *testing.T) {
 	f := NewFilter([]string{"mp4"}, nil, []string{"video"})
 	if !f.Match(client.FsObject{Name: "movie.mp4", Type: 2}) {

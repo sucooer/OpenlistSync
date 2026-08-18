@@ -277,7 +277,12 @@ func (c *Client) Upload(ctx context.Context, localPath, remotePath string, overw
 		return err
 	}
 	req.Header.Set("Authorization", c.token)
-	req.Header.Set("File-Path", url.QueryEscape(remotePath))
+	// File-Path is a URL-escaped path header. QueryEscape uses '+' for
+	// spaces, but OpenList versions that path-unescape this header literally
+	// can then create a different directory ("foo+bar"). Encode spaces as
+	// %20, which is accepted by both query- and path-unescape implementations.
+	filePath := strings.ReplaceAll(url.QueryEscape(remotePath), "+", "%20")
+	req.Header.Set("File-Path", filePath)
 	req.Header.Set("Content-Type", contentType(localPath))
 	req.ContentLength = size
 	req.Header.Set("As-Task", "false")

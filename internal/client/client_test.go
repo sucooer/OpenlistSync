@@ -25,6 +25,32 @@ func newTestServer(t *testing.T, status int, code int, message string) *httptest
 	}))
 }
 
+// TestUploadEscapesSpacesAsPercent20 verifies that upload paths use %20 for
+// spaces instead of '+', which some OpenList versions treat as a literal plus.
+func TestUploadEscapesSpacesAsPercent20(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		gotPath = r.Header.Get("File-Path")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(envelope{Code: 200, Data: json.RawMessage("null")})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-token", "", "", false, func(string, ...any) {})
+	if err := c.Upload(context.Background(), "cover.jpg", "/音乐/杨千嬅 Minor Classics Live音乐会 (2011)/cover.jpg", false, strings.NewReader("data"), 4); err != nil {
+		t.Fatalf("upload should succeed: %v", err)
+	}
+	if strings.Contains(gotPath, "+") {
+		t.Fatalf("File-Path must not encode spaces as '+': %q", gotPath)
+	}
+	if !strings.Contains(gotPath, "%20") {
+		t.Fatalf("File-Path should percent-encode spaces: %q", gotPath)
+	}
+}
+
 // TestMkdirStorageNotFoundIsAnnotated verifies that the raw "storage not
 // found" error from OpenList is decorated with a Chinese hint pointing the
 // operator to the OpenList admin storage list, since the real OpenList

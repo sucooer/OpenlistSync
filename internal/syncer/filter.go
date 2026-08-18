@@ -116,6 +116,9 @@ func (f *Filter) Match(o client.FsObject) bool {
 }
 
 // MatchLocal applies name filters only (no server type available).
+// Extension globs describe file names, so match against the basename rather
+// than the slash-separated relative path. Otherwise "*.jpg" would not match
+// "album/cover.jpg" because path.Match does not cross '/'.
 func (f *Filter) MatchLocal(name string) bool {
-	return f.matchName(name)
+	return f.matchName(path.Base(name))
 }
